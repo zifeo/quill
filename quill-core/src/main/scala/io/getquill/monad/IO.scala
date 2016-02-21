@@ -1,4 +1,4 @@
-package io.getquill.io
+package io.getquill.monad
 
 import scala.util.Success
 import scala.util.Failure
@@ -27,16 +27,16 @@ trait IO[+T] {
   def onComplete[U](f: Try[T] => U): Unit
 
   def failed: IO[Throwable] = {
-    //    val p = Promise[Throwable]()
-    //    onComplete {
-    //      case Failure(t) => p success t
-    //      case Success(v) => p failure (new NoSuchElementException("IO.failed not completed with a throwable."))
-    //    }
-    //    p.IO
-    ???
+    liftToTry.map {
+      case Failure(t) => t
+      case Success(v) => throw new NoSuchElementException("IO.failed not completed with a throwable.")
+    }
   }
 
   def foreach[U](f: T => U): Unit = onComplete { _ foreach f }
+
+  def liftToTry: IO[Try[T]]
+  //    transform[Try[T]](Success(_),(t: Throwable) => Failure(t))
 
   def transform[S](s: T => S, f: Throwable => Throwable): IO[S] = {
     //    val p = Promise[S]()
@@ -48,12 +48,8 @@ trait IO[+T] {
     ???
   }
 
-  def map[S](f: T => S): IO[S] = {
-    //    val p = Promise[S]()
-    //    onComplete { v => p complete (v map f) }
-    //    p.IO
-    ???
-  }
+  def map[S](f: T => S): IO[S] =
+    flatMap(t => IO(f(t)))
 
   def flatMap[S](f: T => IO[S]): IO[S] = {
     //    import impl.Promise.DefaultPromise
@@ -82,36 +78,21 @@ trait IO[+T] {
       r => pf.applyOrElse(r, (t: T) => throw new NoSuchElementException("IO.collect partial function is not defined at: " + t))
     }
 
-  def recover[U >: T](pf: PartialFunction[Throwable, U]): IO[U] = {
-    //    val p = Promise[U]()
-    //    onComplete { v => p complete (v recover pf) }
-    //    p.IO
-    ???
-  }
+  def recover[U >: T](pf: PartialFunction[Throwable, U]): IO[U] =
+    liftToTry.map {
+      case Failure(t) if (pf.isDefinedAt(t)) =>
+        pf(t)
+      case Success(v) =>
+        v
+    }
 
-  /**
-   * Creates a new IO that will handle any matching throwable that this
-   *  IO might contain by assigning it a value of another IO.
-   *
-   *  If there is no match, or if this IO contains
-   *  a valid result then the new IO will contain the same result.
-   *
-   *  Example:
-   *
-   *  {{{
-   *  val f = IO { Int.MaxValue }
-   *  IO (6 / 0) recoverWith { case e: ArithmeticException => f } // result: Int.MaxValue
-   *  }}}
-   */
-  def recoverWith[U >: T](pf: PartialFunction[Throwable, IO[U]]): IO[U] = {
-    //    val p = Promise[U]()
-    //    onComplete {
-    //      case Failure(t) => try pf.applyOrElse(t, (_: Throwable) => this).onComplete(p.complete)(internalExecutor) catch { case NonFatal(t) => p failure t }
-    //      case other => p complete other
-    //    }
-    //    p.IO
-    ???
-  }
+  def recoverWith[U >: T](pf: PartialFunction[Throwable, IO[U]]): IO[U] =
+    liftToTry.flatMap {
+      case Failure(t) if (pf.isDefinedAt(t)) =>
+        pf(t)
+      case Success(v) =>
+        IO.successful(v)
+    }
 
   def zip[U](that: IO[U]): IO[(T, U)] = {
     //    val p = Promise[(T, U)]()
@@ -124,16 +105,12 @@ trait IO[+T] {
   }
 
   def fallbackTo[U >: T](that: IO[U]): IO[U] = {
-    //    val p = Promise[U]()
-    //    onComplete {
-    //      case s @ Success(_) => p complete s
-    //      case f @ Failure(_) => that onComplete {
-    //        case s2 @ Success(_) => p complete s2
-    //        case _ => p complete f // Use the first failure as the failure
-    //      }
-    //    }
-    //    p.IO
-    ???
+    liftToTry.flatMap {
+      case Failure(t) =>
+        that
+      case Success(v) =>
+        IO.successful(v)
+    }
   }
 
   def mapTo[S](implicit tag: ClassTag[S]): IO[S] = {
@@ -145,14 +122,12 @@ trait IO[+T] {
   }
 
   def andThen[U](pf: PartialFunction[Try[T], U]): IO[T] = {
-    //    val p = Promise[T]()
-    //    onComplete {
-    //      case r => try pf.applyOrElse[Try[T], Any](r, Predef.conforms[Try[T]]) finally p complete r
-    //    }
-    //    p.IO
-    ???
+    onComplete {
+      case t if (pf.isDefinedAt(t)) => pf(t)
+      case _                        =>
+    }
+    this
   }
-
 }
 
 object IO {
