@@ -347,10 +347,26 @@ class QuotationSpec extends Spec {
         }
         quote(unquote(q)).ast mustEqual Delete(Entity("TestEntity"))
       }
+      "fails if the assignment types don't match" - {
+        "not related types" in {
+          """
+            quote {
+              qr1.update(t => t.i -> "s")
+            }
+          """ mustNot compile
+        }
+        "primitive and null" in {
+          """
+            quote {
+              qr1.update(t => t.i -> null)
+            }
+          """ mustNot compile
+        }
+      }
     }
     "value" - {
       "null" in {
-        val q = quote(1 != null)
+        val q = quote("s" != null)
         quote(unquote(q)).ast.b mustEqual NullValue
       }
       "constant" in {
@@ -430,11 +446,29 @@ class QuotationSpec extends Spec {
       }
     }
     "binary operation" - {
-      "==" in {
-        val q = quote {
-          (a: Int, b: Int) => a == b
+      "==" - {
+        "normal" in {
+          val q = quote {
+            (a: Int, b: Int) => a == b
+          }
+          quote(unquote(q)).ast.body mustEqual BinaryOperation(Ident("a"), EqualityOperator.`==`, Ident("b"))
         }
-        quote(unquote(q)).ast.body mustEqual BinaryOperation(Ident("a"), EqualityOperator.`==`, Ident("b"))
+        "fails if the types don't match" - {
+          "not related types" in {
+            """
+            quote {
+              (a: Int, b: String) => a == b
+            }
+          """ mustNot compile
+          }
+          "primitive and null" in {
+            """
+            quote {
+              (a: Int) => a == null
+            }
+          """ mustNot compile
+          }
+        }
       }
       "equals" in {
         val q = quote {

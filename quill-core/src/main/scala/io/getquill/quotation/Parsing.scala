@@ -321,11 +321,17 @@ trait Parsing extends EntityConfigParsing {
     case q"${ astParser(a) }.apply[..$t](...$values)" => FunctionApply(a, values.flatten.map(astParser(_)))
   }
 
-  val equalityOperationParser: Parser[Operation] =
-    operationParser(_ => true) {
-      case "==" | "equals" => EqualityOperator.`==`
-      case "!="            => EqualityOperator.`!=`
-    }
+  val equalityOperationParser: Parser[Operation] = Parser[Operation] {
+    case q"$a.==($b)" =>
+      checkTypes(a.tpe, b.tpe)
+      BinaryOperation(astParser(a), EqualityOperator.`==`, astParser(b))
+    case q"$a.equals($b)" =>
+      checkTypes(a.tpe, b.tpe)
+      BinaryOperation(astParser(a), EqualityOperator.`==`, astParser(b))
+    case q"$a.!=($b)" =>
+      checkTypes(a.tpe, b.tpe)
+      BinaryOperation(astParser(a), EqualityOperator.`!=`, astParser(b))
+  }
 
   val booleanOperationParser: Parser[Operation] =
     operationParser(is[Boolean](_)) {
@@ -409,10 +415,19 @@ trait Parsing extends EntityConfigParsing {
 
   private val assignmentParser: Parser[Assignment] = Parser[Assignment] {
     case q"((${ identParser(i1) }) => $pack.Predef.ArrowAssoc[$t](${ identParser(i2) }.$prop).$arrow[$v]($value))" if (i1 == i2) =>
+      checkTypes(t.tpe, v.tpe)
       Assignment(i1, Property(i2, prop.decodedName.toString), astParser(value))
 
     // Unused, it's here only to make eclipse's presentation compiler happy
     case astParser(ast) => Assignment(Ident("unused"), Ident("unused"), Constant("unused"))
   }
 
+  private def isPrimitive(typ: Type) =
+    typ.typeSymbol.isClass && typ.typeSymbol.asClass.isPrimitive
+
+  private def checkTypes(lhs: Type, rhs: Type) =
+    (rhs =:= lhs || rhs.baseType(lhs.typeSymbol) != NoType || (rhs <:< c.typeOf[Null] && !isPrimitive(lhs))) match {
+      case true  => ()
+      case false => c.fail(s"type mismatch:\nfound '$rhs'\nexpected '$lhs'")
+    }
 }
